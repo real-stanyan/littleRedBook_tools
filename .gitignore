@@ -1,0 +1,40 @@
+# --- Python 基础忽略 ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- 虚拟环境 (图中 venv 文件夹) ---
+venv/
+env/
+.env
+
+# --- VS Code 配置 (图中 .vscode 文件夹) ---
+.vscode/
+*.code-workspace
+
+# --- 项目运行时产生的日志 (图中 log 文件夹) ---
+log/
+*.log
+
+# --- 自动化截图/临时图片 (图中 temp_post.jpg) ---
+# 忽略所有 jpg 和 png，防止把截图传上去
+*.jpg
+*.png
+# 特别指定代码中用到的临时文件名
+temp_post.jpg
+current_screen.jpg
+pixel_screen.jpg
+
+# --- uiautomator2 可能产生的临时文件 ---
+atx-agent/
+.uiautomator2/
+
+# --- macOS 系统垃圾文件 (因为看到你的路径是 /Users/stanyan) ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- 其他 ---
+# 如果你有私密的配置文件，记得加在这里
+config.py
+secrets.json
