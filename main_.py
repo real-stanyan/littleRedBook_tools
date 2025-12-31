@@ -69,7 +69,6 @@ class DualAIAgent:
         self.writer_llm = ChatOllama(model=TEXT_MODEL, temperature=0.7)
 
     def extract_json(self, text):
-        # ... (保持原有的 JSON 提取代码不变) ...
         text = text.strip()
         try:
             return json.loads(text)
@@ -83,13 +82,51 @@ class DualAIAgent:
                 pass
         return None
 
-    # ... (保持 optimize_keyword, write_comment 不变) ...
     def optimize_keyword(self, user_input):
-        # ... (保持原样)
-        return user_input
+        """让 AI 决定搜什么"""
+        print(f"🧠 {TEXT_MODEL} 正在优化搜索词...")
+        system_prompt = "你是一个搜索优化大师。根据用户输入，生成一个最容易搜到高质量内容的搜索关键词。只返回关键词，不要解释。"
+        try:
+            resp = self.writer_llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"用户输入：{user_input}")
+            ])
+            optimized = resp.content.strip().replace('"', '').replace("'", "").replace("。", "")
+            print(f"✨ AI 优化: {user_input} -> {optimized}")
+            return optimized
+        except:
+            return user_input
+
+    def see_and_decide(self, image_path):
+        print(f"👀 {VISION_MODEL} 正在分析图片...")
+        with open(image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        # 狂热粉 Prompt
+        prompt = """
+        You are a passionate fan. Analyze the image.
+        UNLESS it is completely black or error screen, you MUST set should_like and should_comment to TRUE.
+        Return STRICT JSON:
+        {
+            "should_like": true,
+            "should_comment": true,
+            "image_desc": "visual description..."
+        }
+        """
+        msg = HumanMessage(content=[
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img_b64}"}
+        ])
+
+        try:
+            resp = self.vision_llm.invoke([msg])
+            return self.extract_json(resp.content)
+        except Exception as e:
+            print(f"❌ 视觉分析失败: {e}")
+            return None
 
     def write_comment(self, image_desc):
-        # ... (保持原样)
+        print(f"✍️ {TEXT_MODEL} 正在构思评论...")
         system_prompt = "你是友善的小红书用户。写一条中文评论。简短(20字内)，带1个emoji，不要带引号。"
         try:
             resp = self.writer_llm.invoke([
@@ -99,69 +136,6 @@ class DualAIAgent:
             return resp.content.strip().replace('"', '').replace("'", "")
         except:
             return "赞！🔥"
-
-    def see_and_decide(self, image_path):
-        # ... (保持原样，这是进帖子之后用的) ...
-        print(f"👀 {VISION_MODEL} 正在分析帖子详情...")
-        with open(image_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
-        
-        prompt = """
-        Analyze this social media post.
-        Return STRICT JSON:
-        {
-            "should_like": true,
-            "should_comment": true,
-            "image_desc": "brief description of the image content"
-        }
-        """
-        msg = HumanMessage(content=[
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img_b64}"}
-        ])
-        try:
-            resp = self.vision_llm.invoke([msg])
-            return self.extract_json(resp.content)
-        except Exception as e:
-            print(f"❌ 详情页分析失败: {e}")
-            return None
-
-    # [新增] 在搜索结果列表中选一个最好看的
-    def choose_feed_post(self, feed_image_path):
-        print(f"🔎 {VISION_MODEL} 正在浏览搜索列表...")
-        with open(feed_image_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-        # 让 AI 从 1(左上), 2(右上), 3(左下), 4(右下) 中选一个
-        prompt = """
-        You are looking at a search result grid on a phone (2 columns).
-        Identify the most attractive or relevant post cover image among the visible ones.
-        
-        The grid layout positions are roughly:
-        1: Top Left
-        2: Top Right
-        3: Bottom Left
-        4: Bottom Right
-        
-        Return STRICT JSON containing ONLY the index (1-4) of the best post:
-        {
-            "choice_index": 1,
-            "reason": "short reason"
-        }
-        """
-        msg = HumanMessage(content=[
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img_b64}"}
-        ])
-        
-        try:
-            resp = self.vision_llm.invoke([msg])
-            data = self.extract_json(resp.content)
-            # 默认选 1 (左上) 以防分析失败
-            return data.get("choice_index", 1) if data else 1
-        except Exception as e:
-            print(f"❌ 选贴分析失败: {e}, 默认选 1")
-            return 1
 
 # ================= 🛠️ 核心修复功能 =================
 def connect_device_robust(serial):
@@ -194,18 +168,17 @@ def connect_device_robust(serial):
 
 def start_app_and_search(d, keyword, logger):
     logger.write_line("🚀 启动小红书...")
+    # 使用 package name 启动更稳
     d.app_start("com.xingin.xhs", stop=True) 
     time.sleep(5)
 
     logger.write_line(f"🔍 执行搜索: {keyword}")
-    # 点击右上角搜索图标 (根据你的设备调整坐标)
     d.click(0.92, 0.06) 
     time.sleep(2)
-    # 点击搜索栏
     d.click(0.5, 0.06)
     time.sleep(1)
     
-    # 输入关键词
+    # 输入处理：中文用粘贴，英文用键盘
     try:
         if re.search(r'[\u4e00-\u9fa5]', keyword):
             d.set_clipboard(keyword)
@@ -220,19 +193,14 @@ def start_app_and_search(d, keyword, logger):
     time.sleep(1)
     d.press("enter")
     time.sleep(4)
-    logger.write_line("开始设置帖子范围...")
-    d.click(120, 297)
-    time.sleep(1)
-    d.click(673, 1540)
-    time.sleep(1)
-    d.click(59, 287)
-    time.sleep(1) 
-    logger.write_line("✅ 搜索完成，准备开始浏览列表...")
+
+    logger.write_line("👆 进入第一个帖子...")
+    d.click(0.25, 0.5) 
+    time.sleep(3)
 
 def process_single_post(d, agent, index, logger):
     logger.write_line(f"正在处理第 {index} 个帖子...")
     
-    # 1. 截图
     img_path = "temp_post.jpg"
     try:
         d.screenshot(img_path)
@@ -240,7 +208,6 @@ def process_single_post(d, agent, index, logger):
         logger.write_line(f"❌ 截图失败: {e}")
         return
 
-    # 2. AI 决策
     decision = agent.see_and_decide(img_path)
     if decision is None: decision = {} 
 
@@ -249,166 +216,134 @@ def process_single_post(d, agent, index, logger):
     image_desc = decision.get('image_desc', '')
     final_comment = ""
 
-    # 3. 点赞
+    # 1. 点赞
     if should_like:
         try:
             d.double_click(0.5, 0.5)
             time.sleep(0.5)
         except: pass
 
-    # 4. 评论 (激活按钮 + 底部打击版)
+    # 2. 评论 (动态坐标修复版)
     if should_comment:
         final_comment = agent.write_comment(image_desc)
         
         if final_comment:
             logger.write_line(f"💬 准备发送: {final_comment}")
             
+            # 点击底部唤起评论框
+            d.click(0.5, 0.96) 
+            time.sleep(1.0)
+            
             try:
-                # --- 动作开始 ---
+                # -----------------------------------------------
+                # 步骤 A: 注入中文 (必须用 set_input_ime)
+                # -----------------------------------------------
+                d.set_input_ime(True) 
+                time.sleep(1.0)
                 
-                # 1. 点击底部唤醒输入框 (复用你的坐标)
-                logger.write_line("👆 点击右下角唤醒...")
-                d.click(964, 2259)
-                time.sleep(1.0)
-                d.click(964, 2259) # 双击保平安
-                time.sleep(1.0)
-
-                # 2. 启用 FastIME 并输入
-                # FastIME 会保持键盘隐藏，输入栏固定在底部
-                d.set_input_ime(True)
-                logger.write_line("✍️ 注入文字...")
                 d.send_keys(final_comment)
                 time.sleep(0.5)
                 
-                # 【关键修复 1】物理激活发送按钮
-                # 模拟按下空格(62) 然后 删除(67)
-                # 这会让灰色按钮变色！
-                logger.write_line("⚡ 物理激活按钮(Space+Del)...")
-                d.shell("input keyevent 62") 
-                time.sleep(0.1)
-                d.shell("input keyevent 67")
+                # 激活按钮状态
+                d.send_keys(" ")
+                d.press("del")
                 time.sleep(0.5)
 
-                # 【关键修复 2】点击位置修正
-                # 既然键盘没弹起来（被FastIME压住了），发送按钮就在最底部
-                # 我们直接点击右下角 (964, 2259) 或者是通用的右下角
-                logger.write_line("👉 点击右下角发送 (同唤醒坐标)")
-                d.click(964, 2259)
+                # -----------------------------------------------
+                # 步骤 B: 智能查找“发送”按钮 (核心修复)
+                # -----------------------------------------------
+                # 既然找不到 text="发送"，我们就找输入框右边那个位置
                 
-                # 双保险：尝试物理回车
+                # 1. 获取当前屏幕上的输入框元素
+                edit_text = d(className="android.widget.EditText")
+                
+                if edit_text.exists:
+                    # 获取输入框的坐标边界: (left, top, right, bottom)
+                    bounds = edit_text.info['bounds'] 
+                    # 计算输入框右侧的中心位置
+                    # 发送按钮通常在输入框右边，高度居中
+                    send_x = bounds['right'] + 50 # 往右偏移 50 像素
+                    send_y = (bounds['top'] + bounds['bottom']) / 2
+                    
+                    # 考虑到屏幕边缘，如果超出了屏幕宽度，就点屏幕最右侧减一点
+                    screen_width = d.window_size()[0]
+                    if send_x >= screen_width:
+                        send_x = screen_width - 30
+
+                    logger.write_line(f"📍 锁定输入框，尝试点击右侧坐标: ({send_x}, {send_y})")
+                    d.click(send_x, send_y)
+                else:
+                    # 如果连输入框都找不到，执行纯盲点兜底
+                    logger.write_line("⚠️ 未找到输入框结构，使用绝对坐标盲点")
+                    # 针对 FastInputIME 隐藏键盘后的底部栏位置
+                    d.click(0.92, 0.965) 
+
+                # -----------------------------------------------
+                # 步骤 C: 补刀 (回车键)
+                # -----------------------------------------------
                 time.sleep(0.5)
                 d.press("enter")
 
-                logger.write_line("✅ 动作执行完毕")
-                time.sleep(2)
-                # --- 动作结束 ---
-
             except Exception as e:
-                logger.write_line(f"❌ 评论失败: {e}")
+                logger.write_line(f"❌ 评论流程异常: {e}")
             
-            finally:
-                logger.write_line("🧹 收尾阶段...")
-                
-                # 1. 彻底关闭 FastInputIME
-                d.set_input_ime(False)
-                
-                # 2. 点击屏幕上方空白处 (尝试关闭评论面板)
-                # 这一步是为了让焦点离开输入框
-                d.click(0.5, 0.2) 
-                time.sleep(1.0)
-                
-                # 3. 【核心修复】使用物理返回键，而不是点坐标
-                # 第一次 Back: 100% 确保关闭评论框/软键盘遮罩
-                logger.write_line("🔙 按下返回键 (清除遮罩)...")
-                d.press("back")
-                time.sleep(1.5)
-                
-                # 4. 第二次 Back: 退出帖子 (回到搜索列表)
-                # 为了保险，我们在这里直接执行退出动作，确保函数结束时已经回到列表
-                logger.write_line("🔙 再次返回 (退出帖子)...")
-                d.press("back")
-                time.sleep(2.0)
+            time.sleep(2) 
+
+            # -----------------------------------------------
+            # 步骤 D: 恢复输入法并复位
+            # -----------------------------------------------
+            d.set_input_ime(False)
+            time.sleep(0.5)
+            
+            # 点击上方空白处退出评论区
+            d.click(0.5, 0.3) 
+            time.sleep(1.0)
 
     logger.log_post_result(index, decision, final_comment)
 def run():
     # 1. 获取输入
-    raw_input = input("请输入想看的内容 (回车默认鱼油): ") or "鱼油"
+    raw_input = input("请输入想看的内容 (回车默认Blender): ") or "Blender"
     try:
         target_count = int(input("请输入要刷的帖子数量: "))
     except:
         target_count = 5
 
-    # 2. 连接设备
+    # 2. 使用增强版连接函数
     try:
         d = connect_device_robust(SERIAL)
-        # 获取屏幕宽高，用于计算绝对坐标
-        w, h = d.window_size()
-        print(f"📱 设备分辨率: {w}x{h}")
     except Exception as e:
-        print(f"❌ 连接失败: {e}")
+        print(f"❌ 最终连接失败，程序退出: {e}")
         return
 
     # 3. 初始化 AI
     agent = DualAIAgent()
-    final_keyword = raw_input # agent.optimize_keyword(raw_input)
+    # final_keyword = agent.optimize_keyword(raw_input)
+    final_keyword = raw_input
     logger = LogManager(final_keyword)
 
-    # 4. 启动并搜索 (停在列表页)
+    # 4. 启动并搜索
     try:
         start_app_and_search(d, final_keyword, logger)
 
+        # 5. 循环刷帖
         processed = 0
         while processed < target_count:
             processed += 1
-            logger.write_line(f"\n🔄 [流程进度 {processed}/{target_count}] 正在列表页选贴...")
-
-            # --- A. 列表页：截图并选择 ---
-            feed_img = "temp_feed.jpg"
-            d.screenshot(feed_img)
             
-            # 让 AI 选一个位置 (1-4)
-            choice_idx = agent.choose_feed_post(feed_img)
-            logger.write_line(f"🎯 AI 选择了位置: {choice_idx}")
-
-            # --- B. 计算坐标并点击 ---
-            # 小红书搜索结果通常是双列瀑布流
-            # 这里的比例是估算的，避开了顶部搜索栏和底部Tab
-            # 1: 左上, 2: 右上, 3: 左下, 4: 右下
-            if choice_idx == 1:
-                click_x, click_y = w * 0.25, h * 0.40
-            elif choice_idx == 2:
-                click_x, click_y = w * 0.75, h * 0.40
-            elif choice_idx == 3:
-                click_x, click_y = w * 0.25, h * 0.75
-            else: # 4
-                click_x, click_y = w * 0.75, h * 0.75
-            
-            logger.write_line(f"👆 点击坐标: ({int(click_x)}, {int(click_y)})")
-            d.click(click_x, click_y)
-            time.sleep(3) # 等待帖子加载
-
-            # --- C. 详情页：互动 (复用你原本的逻辑) ---
-            # 注意：process_single_post 只需要负责看、赞、评，不需要负责下滑
             process_single_post(d, agent, processed, logger)
-
             
-            # --- D. 返回列表页 ---
-            logger.write_line("🔙 返回搜索列表...")
-            
-            
-            # --- E. 列表页：下滑刷新 ---
             if processed < target_count:
-                logger.write_line("📉 下滑查看更多帖子...")
-                # 在列表页从下往上滑
-                d.swipe(w * 0.5, h * 0.8, w * 0.5, h * 0.2, duration=0.1)
-                time.sleep(4) # 等新图加载
+                logger.write_line(f"👆 上滑切换 (进度: {processed}/{target_count})...")
+                # 这里的 swipe 坐标幅度较大，确保带走评论区残留
+                d.swipe(0.5, 0.85, 0.5, 0.15, duration=0.1)
+                time.sleep(4)
             else:
                 logger.write_line("🛑 任务全部完成！")
                 
     except Exception as e:
-        logger.write_line(f"❌ 运行错误: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.write_line(f"❌ 运行中途发生错误: {e}")
+        # 如果中途报错，尝试最后一次复活，方便下次运行
+        # d.reset_uiautomator() 
 
 if __name__ == "__main__":
     run()
